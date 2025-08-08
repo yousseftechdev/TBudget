@@ -1,0 +1,9 @@
+[
+  {
+    "type": "expense",
+    "amount": 50.0,
+    "category": "food",
+    "note": "Monthly food",
+    "day": 1
+  }
+]

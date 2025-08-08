@@ -1,0 +1,6 @@
+datetime,type,amount,category,note
+2025-08-07T20:55:46.600914,expense,500.0,food,Note
+2025-08-07T21:34:21.394959,expense,200.0,water,stuff
+2025-08-07T21:44:23.019091,expense,50.0,water,
+2025-08-08T20:19:40.792850,expense,12.5,food,Lunch
+2025-08-08T20:19:56.886909,income,1000.0,salary,Paycheck
