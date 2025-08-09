@@ -1,28 +1,41 @@
 # TBudget
 
-A terminal budget tracker with rich UI, budget alerts, recurring transactions, sparklines, and interactive shell.
+A terminal budget tracker with rich UI, budget alerts, recurring transactions, graphs, and interactive shell.
 
 ## Features
 
 - **Expense & Income Tracking**: Log categorized expenses and income.
 - **Budget Limits & Alerts 🚨**: Set monthly and per-category budgets. Get warnings when you approach or exceed them.
 - **Recurring Transactions 🔁**: Auto-log regular expenses/income (e.g., rent, subscriptions) on a schedule.
-- **Graphs & Sparklines 📈**: See trends in your spending with sparklines in the summary.
-- **Interactive Mode 🤖**: `tbudget shell` drops you into a REPL for fast entry and queries.
+- **Graphs 📈**: See trends in your spending with bar graphs by month or category.
+- **Currency Conversion 💱**: Instantly convert between currencies using live rates.
+- **AI Assistant 🤖**: Ask questions about your finances with the `ai-assistant` command.
+- **Interactive Mode**: `tbudget shell` drops you into a REPL for fast entry and queries.
 - **Rich UI**: Beautiful tables, colored output, and warnings using [Rich](https://github.com/Textualize/rich).
+- **All Data Local**: All your data is stored locally in the `data/` directory.
+
+## Requirements
+
+- Python 3.8 or newer
+- [Rich](https://github.com/Textualize/rich) (`pip install rich`)
+- [requests](https://pypi.org/project/requests/) (`pip install requests`)
 
 ## Installation
+
 ### Method 1: Running the script
+
 1. Clone this repo.
 2. Install dependencies:
    ```
-   pip install rich
+   pip install rich requests
    ```
 3. Run with:
    ```
    python main.py [command]
    ```
+
 ### Method 2: Using the binary
+
 1. Download the binary from the releases page
 2. Run it from the terminal
 
@@ -67,10 +80,30 @@ python main.py show-recurring
 python main.py list --type expense --category food --from 2024-01-01 --min-amount 10
 ```
 
-### Summary (with trends and filters)
+### Summary (with filters)
 
 ```sh
 python main.py summary --type expense --category food
+```
+
+### Graphs
+
+```sh
+python main.py graph
+python main.py graph --type expense
+python main.py graph --by category
+```
+
+### Currency Conversion
+
+```sh
+python main.py convert-currency 100 USD EUR
+```
+
+### AI Assistant
+
+```sh
+python main.py ai-assistant message "How much did I spend on food last month?"
 ```
 
 ### Interactive Shell
@@ -101,15 +134,24 @@ python main.py help
 - Add recurring expenses/income with `add-recurring`.
 - Each time you run TBudget, it checks if a recurring transaction is due and logs it automatically.
 
-## Graphs & Sparklines
+## Graphs
 
-- The summary table includes a trend column with a sparkline or ASCII bar showing monthly totals.
+- Use the `graph` command to see bar graphs of your spending by month or by category.
+
+## Currency Conversion
+
+- Instantly convert between currencies using live rates from open.er-api.com.
+
+## AI Assistant
+
+- Ask questions about your finances using the `ai-assistant` command. The assistant uses your local data but does not display raw data unless asked.
 
 ## Data Files
 
-- Records: `records.csv`
-- Budgets: `budgets.json`
-- Recurring: `recurring.json`
+- All data is stored locally in the `data/` directory:
+  - Records: `data/records.csv`
+  - Budgets: `data/budgets.json`
+  - Recurring: `data/recurring.json`
 
 ---
 

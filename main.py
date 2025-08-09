@@ -10,22 +10,32 @@ from rich.live import Live
 from rich.progress import BarColumn, Progress
 from rich.text import Text
 import shlex
+import requests
 
 console = Console()
 
-CSV_FILE = "records.csv"
-BUDGET_FILE = "budgets.json"
-RECUR_FILE = "recurring.json"
+DATA_DIR = "data"
+CSV_FILE = os.path.join(DATA_DIR, "records.csv")
+BUDGET_FILE = os.path.join(DATA_DIR, "budgets.json")
+RECUR_FILE = os.path.join(DATA_DIR, "recurring.json")
 FIELDS = ["datetime", "type", "amount", "category", "note"]
 PASSWORD_FILE = "password.txt"
 
+# Ensure the data directory exists
+def ensure_data_dir():
+    if not os.path.exists(DATA_DIR):
+        os.makedirs(DATA_DIR)
+
+# Ensure the CSV file exists and has headers
 def ensure_csv():
+    ensure_data_dir()
     if not os.path.exists(CSV_FILE):
         with open(CSV_FILE, "w", newline="") as f:
             writer = csv.writer(f)
             writer.writerow(FIELDS)
 
 def load_json(path, default):
+    ensure_data_dir()
     if not os.path.exists(path):
         return default
     with open(path, "r") as f:
@@ -35,6 +45,7 @@ def load_json(path, default):
             return default
 
 def save_json(path, data):
+    ensure_data_dir()
     with open(path, "w") as f:
         json.dump(data, f, indent=2)
 
@@ -44,7 +55,6 @@ def get_month(dt):
 def check_budgets(amount, category, dt, budgets):
     alerts = []
     month = get_month(dt)
-    # Monthly total
     monthly_total = 0
     cat_total = 0
     if os.path.exists(CSV_FILE):
@@ -59,14 +69,12 @@ def check_budgets(amount, category, dt, budgets):
                             cat_total += float(row["amount"])
                 except Exception:
                     continue
-    # Check monthly
     if "monthly" in budgets:
         limit = budgets["monthly"]
         if monthly_total + amount > limit:
             alerts.append(f"[bold red]🚨 Monthly budget exceeded! ({monthly_total+amount:.2f}/{limit})[/]")
         elif monthly_total + amount > 0.9 * limit:
             alerts.append(f"[red]⚠️ Near monthly budget! ({monthly_total+amount:.2f}/{limit})[/]")
-    # Check category
     if "categories" in budgets and category in budgets["categories"]:
         limit = budgets["categories"][category]
         if cat_total + amount > limit:
@@ -193,11 +201,9 @@ def summary(filter_type=None, filter_category=None, date_from=None, date_to=None
 
 def graph(filter_type=None, filter_category=None, by="month"):
     ensure_csv()
-    # Default to "expense" if no type is specified
     if filter_type is None:
         filter_type = "expense"
     if by == "category":
-        # Aggregate by category
         cat_totals = {}
         try:
             with open(CSV_FILE) as f:
@@ -222,7 +228,6 @@ def graph(filter_type=None, filter_category=None, by="month"):
         except Exception as e:
             console.print(f"[red]Error generating graph: {e}[/]")
     else:
-        # Aggregate by month (default)
         monthly = {}
         try:
             with open(CSV_FILE) as f:
@@ -241,7 +246,6 @@ def graph(filter_type=None, filter_category=None, by="month"):
             if not monthly:
                 console.print("[yellow]No data to graph.[/]")
                 return
-            # Sort months
             months = sorted(monthly.keys())
             vals = [monthly[m] for m in months]
             max_val = max(vals)
@@ -258,13 +262,13 @@ def graph(filter_type=None, filter_category=None, by="month"):
 def list_records(filter_type=None, filter_category=None, date_from=None, date_to=None, min_amount=None, max_amount=None):
     ensure_csv()
     table = Table(title="All Records", box=box.SIMPLE_HEAVY)
+    table.add_column("ID", justify="right", style="bold yellow")
     for field in FIELDS:
         table.add_column(field.capitalize())
     try:
         with open(CSV_FILE) as f:
             reader = csv.DictReader(f)
-            for row in reader:
-                # Filtering
+            for idx, row in enumerate(reader, 1):
                 if filter_type and row["type"] != filter_type:
                     continue
                 if filter_category and row["category"] != filter_category:
@@ -292,6 +296,7 @@ def list_records(filter_type=None, filter_category=None, date_from=None, date_to
                 except Exception:
                     dt_disp = row["datetime"]
                 table.add_row(
+                    str(idx),
                     dt_disp,
                     f"[{color}]{row['type']}[/{color}]",
                     row["amount"],
@@ -452,81 +457,193 @@ def shell():
                 continue
             if not cmd.strip():
                 continue
-            args = shlex.split(cmd)  # Use shlex.split for proper argument parsing
-            # Simulate sys.argv
+            args = shlex.split(cmd)
             try:
                 main(args, shell_mode=True)
             except SystemExit:
-                # Don't exit the shell on error
                 continue
         except (KeyboardInterrupt, EOFError):
             break
         except Exception as e:
             console.print(f"[red]Shell error: {e}[/]")
 
+def convert_currency(amount, src, dst):
+    # Convert amount from src currency to dst currency using open.er-api.com
+    try:
+        data = requests.get(f"https://open.er-api.com/v6/latest/{src.upper()}", timeout=5).json()
+        rate = data["rates"].get(dst.upper())
+        return rate * amount if rate else None
+    except Exception as e:
+        console.print(f"[red]Currency conversion error: {e}[/]")
+        return None
+
+def currency_command(amount, src, dst):
+    result = convert_currency(amount, src, dst)
+    if result is not None:
+        console.print(f"[green]{amount} {src.upper()} = {result:.2f} {dst.upper()}[/]")
+    else:
+        console.print(f"[red]Conversion failed from {src.upper()} to {dst.upper()}.[/]")
+
+def get_all_data_for_ai():
+    # Gather all user data for the AI assistant prompt, but do NOT display in terminal
+    ensure_csv()
+    ensure_data_dir()
+    records = []
+    try:
+        with open(CSV_FILE) as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                records.append(row)
+    except Exception:
+        pass
+    budgets = load_json(BUDGET_FILE, {})
+    recurring = load_json(RECUR_FILE, [])
+    summary = {}
+    for row in records:
+        key = f"{row['type']}::{row['category']}"
+        summary[key] = summary.get(key, 0) + float(row["amount"])
+    return {
+        "records": records,
+        "budgets": budgets,
+        "recurring": recurring,
+        "summary": summary,
+    }
+
+def ai_assistant_command(user_message, model="qwen/qwen3-32b", temperature=0.7, max_completion_tokens=512, show_think=False):
+    # Sends a prompt to ai.hackclub.com with all user data included in the system prompt
+    ai_data = get_all_data_for_ai()
+    system_prompt = (
+        "You are a financial assistant. The following is the user's complete financial data:\n"
+        f"Records: {json.dumps(ai_data['records'], ensure_ascii=False)}\n"
+        f"Budgets: {json.dumps(ai_data['budgets'], ensure_ascii=False)}\n"
+        f"Recurring: {json.dumps(ai_data['recurring'], ensure_ascii=False)}\n"
+        f"Summary: {json.dumps(ai_data['summary'], ensure_ascii=False)}\n"
+        "Respond to the user's request using this data. Do not reveal the raw data unless asked."
+    )
+    payload = {
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_message}
+        ],
+        "model": model,
+        "temperature": temperature,
+        "max_completion_tokens": max_completion_tokens
+    }
+    try:
+        resp = requests.post(
+            "https://ai.hackclub.com/chat/completions",
+            headers={"Content-Type": "application/json"},
+            data=json.dumps(payload),
+            timeout=30
+        )
+        data = resp.json()
+        content = data["choices"][0]["message"]["content"]
+        if not show_think:
+            import re
+            content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL)
+        console.print(Panel(content.strip(), title="AI Assistant", style="magenta"))
+    except Exception as e:
+        console.print(f"[red]AI assistant error: {e}[/]")
+
+def reset_data():
+    # Delete all user data files in the data directory
+    files = [CSV_FILE, BUDGET_FILE, RECUR_FILE]
+    for f in files:
+        try:
+            if os.path.exists(f):
+                os.remove(f)
+        except Exception as e:
+            console.print(f"[red]Error deleting {f}: {e}[/]")
+    console.print("[bold red]All user data has been reset![/]")
+
 def main(argv=None, shell_mode=False):
     process_recurring()
     p = RichArgumentParser(prog="TBudget", add_help=False)
     sub = p.add_subparsers(dest="cmd")
-    a1 = sub.add_parser("add-expense")
+
+    # Add-expense/income
+    a1 = sub.add_parser("add-expense", aliases=["ae"])
     a1.add_argument("amount", type=float)
     a1.add_argument("category")
     a1.add_argument("--note", default="")
-    a2 = sub.add_parser("add-income")
+    a2 = sub.add_parser("add-income", aliases=["ai"])
     a2.add_argument("amount", type=float)
     a2.add_argument("category")
     a2.add_argument("--note", default="")
-    s = sub.add_parser("summary")
+
+    # Summary
+    s = sub.add_parser("summary", aliases=["sum"])
     s.add_argument("--type", choices=["expense", "income"], help="Filter by record type")
     s.add_argument("--category", help="Filter by category")
     s.add_argument("--from", dest="date_from", help="Filter from date (YYYY-MM-DD)")
     s.add_argument("--to", dest="date_to", help="Filter to date (YYYY-MM-DD)")
-    l = sub.add_parser("list")
+
+    # List
+    l = sub.add_parser("list", aliases=["ls"])
     l.add_argument("--type", choices=["expense", "income"], help="Filter by record type")
     l.add_argument("--category", help="Filter by category")
     l.add_argument("--from", dest="date_from", help="Filter from date (YYYY-MM-DD)")
     l.add_argument("--to", dest="date_to", help="Filter to date (YYYY-MM-DD)")
     l.add_argument("--min-amount", type=float, help="Show only records with amount >= this value")
     l.add_argument("--max-amount", type=float, help="Show only records with amount <= this value")
-    g = sub.add_parser("graph")
+
+    # Graph
+    g = sub.add_parser("graph", aliases=["gr"])
     g.add_argument("--type", choices=["expense", "income"], help="Filter by record type")
     g.add_argument("--category", help="Filter by category")
     g.add_argument("--by", choices=["month", "category"], default="month", help="Graph by month or by category")
-    sb = sub.add_parser("set-budget")
+
+    # Set budget
+    sb = sub.add_parser("set-budget", aliases=["sb"])
     sb.add_argument("--monthly", type=float, help="Set monthly budget")
     sb.add_argument("--category", help="Set category budget")
     sb.add_argument("--amount", type=float, help="Budget amount for category")
-    sub.add_parser("show-budgets")
-    ar = sub.add_parser("add-recurring")
+    sub.add_parser("show-budgets", aliases=["budgets"])
+
+    # Recurring
+    ar = sub.add_parser("add-recurring", aliases=["ar"])
     ar.add_argument("type", choices=["expense", "income"])
     ar.add_argument("amount", type=float)
     ar.add_argument("category")
     ar.add_argument("note")
     ar.add_argument("day", type=int, help="Day of month (1-31)")
-    sub.add_parser("show-recurring")
-    sub.add_parser("shell")
-    sub.add_parser("help")
-    sub.add_parser("delete").add_argument("record_id", type=int)
-    sub.add_parser("rm").add_argument("record_id", type=int)  # Alias
-    e = sub.add_parser("edit")
+    sub.add_parser("show-recurring", aliases=["recurring"])
+
+    # Shell/help
+    sub.add_parser("shell", aliases=["sh"])
+    sub.add_parser("help", aliases=["h", "?"])
+
+    # Delete/edit/search/aliases
+    sub.add_parser("delete", aliases=["del", "rm"]).add_argument("record_id", type=int)
+    e = sub.add_parser("edit", aliases=["ed", "mod"])
     e.add_argument("record_id", type=int)
     e.add_argument("field")
     e.add_argument("value")
-    me = sub.add_parser("mod")
-    me.add_argument("record_id", type=int)
-    me.add_argument("field")
-    me.add_argument("value")
-    sub.add_parser("search").add_argument("keyword")
-    sub.add_parser("find").add_argument("keyword")
+    sub.add_parser("search", aliases=["find", "f"]).add_argument("keyword")
+
+    # Currency conversion
+    cc = sub.add_parser("convert-currency", aliases=["cc"])
+    cc.add_argument("amount", type=float)
+    cc.add_argument("src")
+    cc.add_argument("dst")
+
+    # AI assistant
+    ai_parser = sub.add_parser("ai-assistant", aliases=["ask"])
+    ai_parser.add_argument("message", nargs="+", help="Ask the AI assistant a question")
+    ai_parser.add_argument("--show-think", action="store_true", help="Show AI's <think>...</think> reasoning if present")
+
+    # Data reset
+    sub.add_parser("reset-data", aliases=["reset", "clear-data"])
+
     if argv is None:
         argv = sys.argv[1:]
     args = p.parse_args(argv)
 
-    if args.cmd == "add-expense":
+    if args.cmd in ("add-expense", "ae"):
         add_record("expense", args.amount, args.category, args.note)
-    elif args.cmd == "add-income":
+    elif args.cmd in ("add-income", "ai"):
         add_record("income", args.amount, args.category, args.note)
-    elif args.cmd == "summary":
+    elif args.cmd in ("summary", "sum"):
         date_from = datetime.fromisoformat(args.date_from) if args.date_from else None
         date_to = datetime.fromisoformat(args.date_to) if args.date_to else None
         summary(
@@ -535,7 +652,7 @@ def main(argv=None, shell_mode=False):
             date_from=date_from,
             date_to=date_to,
         )
-    elif args.cmd == "list":
+    elif args.cmd in ("list", "ls"):
         date_from = datetime.fromisoformat(args.date_from) if args.date_from else None
         date_to = datetime.fromisoformat(args.date_to) if args.date_to else None
         list_records(
@@ -546,35 +663,42 @@ def main(argv=None, shell_mode=False):
             min_amount=args.min_amount,
             max_amount=args.max_amount,
         )
-    elif args.cmd == "graph":
+    elif args.cmd in ("graph", "gr"):
         graph(
             filter_type=args.type,
             filter_category=args.category,
             by=args.by,
         )
-    elif args.cmd == "set-budget":
+    elif args.cmd in ("set-budget", "sb"):
         if args.monthly is not None:
             set_budget(monthly=args.monthly)
         elif args.category and args.amount is not None:
             set_budget(category=args.category, amount=args.amount)
         else:
             console.print("[red]Specify --monthly or both --category and --amount[/]")
-    elif args.cmd == "show-budgets":
+    elif args.cmd in ("show-budgets", "budgets"):
         show_budgets()
-    elif args.cmd == "add-recurring":
+    elif args.cmd in ("add-recurring", "ar"):
         add_recurring(args.type, args.amount, args.category, args.note, args.day)
-    elif args.cmd == "show-recurring":
+    elif args.cmd in ("show-recurring", "recurring"):
         show_recurring()
-    elif args.cmd == "shell":
+    elif args.cmd in ("shell", "sh"):
         shell()
-    elif args.cmd == "help" or args.cmd is None:
+    elif args.cmd in ("help", "h", "?") or args.cmd is None:
         help_cmd()
-    elif args.cmd in ("delete", "rm"):
+    elif args.cmd in ("delete", "del", "rm"):
         delete_record(args.record_id)
-    elif args.cmd in ("edit", "mod"):
+    elif args.cmd in ("edit", "ed", "mod"):
         edit_record(args.record_id, args.field, args.value)
-    elif args.cmd in ("search", "find"):
+    elif args.cmd in ("search", "find", "f"):
         search_records(args.keyword)
+    elif args.cmd in ("convert-currency", "cc"):
+        currency_command(args.amount, args.src, args.dst)
+    elif args.cmd in ("ai-assistant", "ai"):
+        user_message = " ".join(args.message)
+        ai_assistant_command(user_message, show_think=getattr(args, "show_think", False))
+    elif args.cmd in ("reset-data", "reset", "clear-data"):
+        reset_data()
     elif shell_mode:
         console.print("[red]Unknown command.[/]")
 
